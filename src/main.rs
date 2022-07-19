@@ -4,10 +4,11 @@ use ggez::*;
 use glam::*;
 use rand::Rng;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct Object {
     position: Vec2,
     velocity: Vec2,
+    acceleration: Vec2,
     mass: f32,
     radius: f32,
     color: graphics::Color,
@@ -16,18 +17,16 @@ struct Object {
 impl Object {
     fn new(ctx: &Context) -> Object {
         let mut rng = rand::thread_rng();
-        let (width, height) = ctx.gfx.drawable_size();
-        let mut max_distance = width / 2.0;
-        if height > width {
-            max_distance = height / 2.0;
-        }
-        let distance = rng.gen_range(10.0..max_distance);
-        let angle = rng.gen_range(0.0..2.0 * PI);
+        let distance: f32 = rng.gen_range(100.0..150.0);
+        let angle: f32 = rng.gen_range(0.0..2.0 * PI);
+        let mass: f32 = rng.gen_range(10.0..15.0);
+        let radius: f32 = mass.sqrt() * 2.0;
         Object {
             position: vec2(distance * angle.sin(), distance * angle.cos()),
-            velocity: vec2(rng.gen_range(0.0..10.0), rng.gen_range(0.0..10.0)),
-            mass: rng.gen_range(10.0..100.0),
-            radius: rng.gen_range(0.2..10.0),
+            velocity: vec2(rng.gen_range(0.0..0.1), rng.gen_range(0.0..0.1)),
+            acceleration: vec2(0.0, 0.0),
+            mass,
+            radius,
             color: graphics::Color::WHITE,
         }
     }
@@ -51,6 +50,20 @@ impl Object {
         self.color = color;
         self
     }
+    fn calculate_force(&mut self, other: &Object) {
+        self.acceleration = vec2(0.0, 0.0);
+        //let G = 6.674e-11;
+        let G = 1.0;
+        let r_squared = self.position.distance_squared(other.position);
+        let normal = -(self.position - other.position).normalize();
+        self.acceleration +=
+            ((((G * (self.mass as f64) * (other.mass as f64)) / r_squared as f64) as f32) * normal)
+                / self.mass;
+    }
+    fn update(&mut self, dt: f32) {
+        self.velocity += self.acceleration * dt;
+        self.position += self.velocity * dt;
+    }
     fn draw(self, ctx: &Context, offset: Vec2) -> GameResult<graphics::Mesh> {
         graphics::Mesh::new_circle(
             ctx,
@@ -72,7 +85,7 @@ impl State {
     fn new(ctx: &mut Context) -> GameResult<State> {
         let mut rng = rand::thread_rng();
         let mut objects: Vec<Object> = vec![];
-        for _ in 0..rng.gen_range(10..100) {
+        for _ in 0..rng.gen_range(5..10) {
             objects.push(Object::new(&ctx));
         }
         Ok(State {
@@ -85,6 +98,17 @@ impl State {
 impl ggez::event::EventHandler<GameError> for State {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
         self.dt = ctx.time.delta();
+        for i in 0..self.objects.len() {
+            for j in 0..self.objects.len() {
+                if i != j {
+                    let other = self.objects[j].clone();
+                    self.objects[i].calculate_force(&other);
+                }
+            }
+        }
+        for i in 0..self.objects.len() {
+            self.objects[i].update(0.1);
+        }
         Ok(())
     }
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
@@ -115,8 +139,8 @@ impl ggez::event::EventHandler<GameError> for State {
         }
 
         //Space used
-        let full_x = max_x - min_x;
-        let full_y = max_y - min_x;
+        let full_x = (max_x - min_x) * 1.2;
+        let full_y = (max_y - min_x) * 1.2;
 
         //Determine the scaling needed
         let scale_x = width / full_x;
@@ -134,10 +158,11 @@ impl ggez::event::EventHandler<GameError> for State {
         let offset = vec2(-min_x + width_offset, -min_y + height_offset);
 
         println!(
-            "dt = {}ns  {}x{}",
+            "dt = {}ns  {}x{} {:?}",
             self.dt.as_nanos(),
             width,
             height,
+            self.objects[0],
         );
 
         for object in &self.objects {
