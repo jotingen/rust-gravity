@@ -17,13 +17,14 @@ struct Object {
 impl Object {
     fn new(ctx: &Context) -> Object {
         let mut rng = rand::thread_rng();
-        let distance: f32 = rng.gen_range(100.0..150.0);
+        let distance: f32 = rng.gen_range(100.0..1500.0);
         let angle: f32 = rng.gen_range(0.0..2.0 * PI);
+        let velocity: f32 = rng.gen_range(0.0..1.0);
         let mass: f32 = rng.gen_range(10.0..15.0);
         let radius: f32 = mass.sqrt() * 2.0;
         Object {
             position: vec2(distance * angle.sin(), distance * angle.cos()),
-            velocity: vec2(rng.gen_range(0.0..0.1), rng.gen_range(0.0..0.1)),
+            velocity: vec2(velocity * (angle+PI/2.0).sin(), velocity * (angle+PI/2.0).cos()),
             acceleration: vec2(0.0, 0.0),
             mass,
             radius,
@@ -49,6 +50,15 @@ impl Object {
     fn with_color(mut self, color: graphics::Color) -> Object {
         self.color = color;
         self
+    }
+    fn isColliding(&self, other: &Object) -> bool {
+         self.position.distance(other.position) <= (self.radius + other.radius) 
+    }
+    fn merge(&mut self, other: &Object) {
+        self.position = ( self.position*self.mass + other.position*other.mass) / (self.mass+other.mass);
+        self.velocity = ( self.velocity*self.mass + other.velocity*other.mass) / (self.mass+other.mass);
+        self.mass = self.mass+other.mass;
+        self.radius = self.mass.sqrt() * 2.0;
     }
     fn calculate_force(&mut self, other: &Object) {
         self.acceleration = vec2(0.0, 0.0);
@@ -85,9 +95,10 @@ impl State {
     fn new(ctx: &mut Context) -> GameResult<State> {
         let mut rng = rand::thread_rng();
         let mut objects: Vec<Object> = vec![];
-        for _ in 0..rng.gen_range(5..10) {
+        for _ in 0..rng.gen_range(500..1000) {
             objects.push(Object::new(&ctx));
         }
+        objects.push(Object::new(&ctx).with_position(vec2(0.0,0.0)).with_velocity(vec2(0.0,0.0)).with_mass(1000.0).with_radius(1000.0f32.sqrt()*2.0));
         Ok(State {
             dt: ctx.time.delta(),
             objects: objects,
@@ -98,6 +109,7 @@ impl State {
 impl ggez::event::EventHandler<GameError> for State {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
         self.dt = ctx.time.delta();
+        //Determine forces
         for i in 0..self.objects.len() {
             for j in 0..self.objects.len() {
                 if i != j {
@@ -106,8 +118,23 @@ impl ggez::event::EventHandler<GameError> for State {
                 }
             }
         }
+        //Update velocity/position
         for i in 0..self.objects.len() {
-            self.objects[i].update(0.1);
+            self.objects[i].update(10.0);
+        }
+        //Check for collisions
+        let mut i = 0;
+        while i < self.objects.len()-1 {
+            let mut j = i+1;
+            while j < self.objects.len() {
+                if self.objects[i].isColliding(&self.objects[j]) {
+                    let other = self.objects[j].clone();
+                    self.objects[i].merge(&other);
+                    self.objects.remove(j);
+                    j = i+1;
+                } else {j+=1;}
+            }
+            i += 1
         }
         Ok(())
     }
@@ -157,13 +184,13 @@ impl ggez::event::EventHandler<GameError> for State {
         let height_offset = height_offset_scaled / scale;
         let offset = vec2(-min_x + width_offset, -min_y + height_offset);
 
-        println!(
-            "dt = {}ns  {}x{} {:?}",
-            self.dt.as_nanos(),
-            width,
-            height,
-            self.objects[0],
-        );
+        //println!(
+        //    "dt = {}ns  {}x{} {:?}",
+        //    self.dt.as_nanos(),
+        //    width,
+        //    height,
+        //    self.objects[0],
+        //);
 
         for object in &self.objects {
             canvas.draw(
